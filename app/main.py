@@ -15,7 +15,7 @@ def get_db():
         db.close()
 
 
-@app.post("/users/", response_model=schemas.User)
+@app.post("/register/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = crud.get_user_by_email(db, email=user.email)
     if db_user:
@@ -57,3 +57,4 @@ def read_user_posts(user_id: int, db: Session = Depends(get_db)):
 def read_posts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     posts = crud.get_posts(db, skip=skip, limit=limit)
     return posts
+

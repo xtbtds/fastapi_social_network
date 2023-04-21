@@ -38,3 +38,4 @@ class User(UserBase):
     items: List[Post] = []
     class Config:
         orm_mode = True
+
