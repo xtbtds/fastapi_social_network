@@ -1,6 +1,6 @@
 from typing import List, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PostBase(BaseModel):
@@ -35,7 +35,18 @@ class UserCreate(UserBase):
 class User(UserBase):
     id: int
     is_active: bool
+    hashed_password: str
     items: List[Post] = []
     class Config:
         orm_mode = True
+
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    email: Union[str, None] = None
 
