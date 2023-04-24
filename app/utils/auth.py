@@ -40,5 +40,7 @@ def create_refresh_token(data: dict, expires_delta: Union[timedelta, None] = Non
 
 def verify_token(db, token: str):
     decoded_token = jwt.decode(token, settings.SECRET_KEY, algorithms=settings.ALGORITHM)
+    print('================================')
+    print(decoded_token)
     user = crud.get_user_by_email(db, email=decoded_token.get('email'))
     return user
