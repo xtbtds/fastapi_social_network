@@ -7,8 +7,10 @@ class PostBase(BaseModel):
     title: str
     content: Union[str, None] = None
 
+
 class PostCreate(PostBase):
     pass
+
 
 class Post(PostBase):
     id: int
@@ -16,7 +18,7 @@ class Post(PostBase):
 
     class Config:
         orm_mode = True
-        # orm_mode will tell the Pydantic model to read the data even if it is not a dict, 
+        # orm_mode will tell the Pydantic model to read the data even if it is not a dict,
         # but an ORM model (or any other arbitrary object with attributes).
 
         # Without orm_mode: it wouldn't include the relationship data.
@@ -25,21 +27,22 @@ class Post(PostBase):
 
 class UserBase(BaseModel):
     email: str
+
+
+class UserDetailed(UserBase):
     name: str
     surname: str
 
-class UserCreate(UserBase):
+
+class UserCreate(UserDetailed):
     password: str
 
 
 class User(UserBase):
-    id: int
     is_active: bool
-    hashed_password: str
-    items: List[Post] = []
+
     class Config:
         orm_mode = True
-
 
 
 class Token(BaseModel):
@@ -49,4 +52,3 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Union[str, None] = None
-

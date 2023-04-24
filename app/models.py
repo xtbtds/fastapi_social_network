@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -10,9 +11,10 @@ class User(Base):
     surname = Column(String)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=False, nullable=False)
 
     posts = relationship("Post", back_populates="owner")
+
 
 class Post(Base):
     __tablename__ = "posts"
@@ -23,6 +25,7 @@ class Post(Base):
     owner_id = Column(Integer, ForeignKey("users.id"))
 
     owner = relationship("User", back_populates="posts")
+
 
 # class Group(Base):
 #     __tablename__ = "groups"
