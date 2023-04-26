@@ -1,11 +1,9 @@
 import logging
 from datetime import datetime, timedelta
 from typing import List
-import os
 
 import jose
-import orjson
-from fastapi.responses import HTMLResponse, ORJSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, ORJSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
 from jose import JWTError, jwt
@@ -18,8 +16,9 @@ from app.core.database import SessionLocal
 from app.schemas import User
 from app.utils import auth, pass_hash
 from email_core.celery_worker import task_send_notification
-from email_core.emails import send_confirmation, send_notification
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status, BackgroundTasks
+from email_core.emails import send_confirmation
+from fastapi import (BackgroundTasks, Depends, FastAPI, HTTPException, Request,
+                     Response, status)
 
 app = FastAPI()
 
@@ -63,11 +62,13 @@ def email_verification(token: str, db: Session = Depends(get_db)):
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if user:
+    if user and not user.is_active:
         user.is_active = True
         db.add(user)
         db.commit()
         return 'ok'
+    elif user.is_active:
+        return 'user has been activated already'
     
 
 
@@ -226,20 +227,16 @@ async def set_maintenance_mode(
 ):
     users = crud.get_users(db)
     for user in users:
-        print('---------------------------------')
-        print(user.email)
         task_send_notification.delay(user.email)
     return 'ok'
 
+# @app.post("/ex1")
+# def run_task(data=Body(...)):
+#     amount = int(data["amount"])
+#     x = data["x"]
+#     y = data["y"]
+#     task1 = create_task.delay(amount, x, y)
+#     task2 = create_task.delay(amount, x, y)
+#     task3 = create_task.delay(amount, x, y)
+#     return JSONResponse({"Result1": task1.get(), "Result2": task2.get(), "Result3": task3.get()})
 
-# @app.get("/maintenance")
-# async def set_maintenance_mode(
-#     current_admin_user: Annotated[schemas.User, Depends(get_current_admin_user)],
-#     db: Session = Depends(get_db)
-# ):
-#     users = crud.get_users(db)
-#     for user in users:
-#         print('---------------------------------')
-#         print(user.email)
-#         send_maintenance_notification.delay(user.email)
-#     return 'ok'

@@ -5,7 +5,6 @@ from jose import jwt
 
 from app import schemas
 from app.core.config import settings
-from app.utils import auth
 
 conf = ConnectionConfig(
     MAIL_USERNAME=settings.EMAIL_USERNAME,
@@ -73,7 +72,7 @@ async def send_notification(email):
     """
     message = MessageSchema(
         subject="Application unavailable due to maintenance mode",
-        recipients=[email],  # List of recipients, as many as you can pass
+        recipients=[email],
         body=template,
         subtype="html",
     )
