@@ -19,11 +19,9 @@ conf = ConnectionConfig(
     MAIL_SSL_TLS=False,
 )
 
-
 async def send_confirmation(email: List, instance: schemas.User):
     token_data = {"id": instance.id, "email": instance.email}
     token = jwt.encode(token_data, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-
     template = f"""
         <!DOCTYPE html>
         <html>
@@ -43,7 +41,6 @@ async def send_confirmation(email: List, instance: schemas.User):
             </body>
         </html>
     """
-
     message = MessageSchema(
         subject="Account Verification Mail",
         recipients=[email],  # List of recipients, as many as you can pass
@@ -51,5 +48,34 @@ async def send_confirmation(email: List, instance: schemas.User):
         subtype="html",
     )
 
+    fm = FastMail(conf)
+    await fm.send_message(message)
+
+
+
+
+# send emails when maintenance mode on
+async def send_notification(email):
+    template = """
+        <!DOCTYPE html>
+        <html>
+            <head>
+                <meta charset="utf-8">
+            </head>
+            <body>
+                <div style=" display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                    <h3> Application unavailable </h3>
+                    <br>
+                    <p>Application unavailable due to maintenance mode</p> 
+                </div>
+            </body>
+        </html>
+    """
+    message = MessageSchema(
+        subject="Application unavailable due to maintenance mode",
+        recipients=[email],  # List of recipients, as many as you can pass
+        body=template,
+        subtype="html",
+    )
     fm = FastMail(conf)
     await fm.send_message(message)

@@ -25,4 +25,7 @@ class Settings:
     DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_SERVER}/{POSTGRES_DB}"
 
 
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL")
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND")
+
 settings = Settings()

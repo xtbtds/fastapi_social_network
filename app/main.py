@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from typing import List
+import os
 
 import jose
 import orjson
@@ -16,8 +17,9 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.schemas import User
 from app.utils import auth, pass_hash
-from email_core.emails import send_confirmation
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from email_core.celery_worker import task_send_notification
+from email_core.emails import send_confirmation, send_notification
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status, BackgroundTasks
 
 app = FastAPI()
 
@@ -35,7 +37,7 @@ def get_db():
 
 
 @app.post("/register/")
-async def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+async def create_user(background_tasks: BackgroundTasks, user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = crud.get_user_by_email(db, email=user.email)
     if db_user:
         raise HTTPException(
@@ -43,8 +45,7 @@ async def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         )
     db_user = crud.create_user(db=db, user=user)
     if db_user:
-        await send_confirmation(user.email, db_user)
-       
+        background_tasks.add_task(send_confirmation, user.email, db_user)
         return ORJSONResponse(User(**db_user.__dict__).dict(),status.HTTP_201_CREATED)
     return Response(status_code=status.HTTP_403_FORBIDDEN)
 
@@ -53,7 +54,7 @@ templates = Jinja2Templates(directory="templates")
 
 
 @app.get("/verification", response_class=HTMLResponse)
-async def email_verification(token: str, db: Session = Depends(get_db)):
+def email_verification(token: str, db: Session = Depends(get_db)):
     try:
         user = auth.verify_token(db, token)
     except jose.exceptions.JWTError:
@@ -195,7 +196,8 @@ async def refresh(refresh_token: str, db: Session = Depends(get_db)):
     )
     return {"access_token": access_token, "refresh_token": refresh_token}
     # 1. should be store in cookies
-    # 2. should become invalid when used
+    # 2. should become invalid when used (delete cookie or what?)
+    # 3. question: when verifying token, should its expiration date be checked?
 
 
 
@@ -205,3 +207,39 @@ async def read_users_me(
     current_user: Annotated[schemas.User, Depends(get_current_active_user)]
 ):
     return current_user
+
+
+# Dependency
+async def get_current_admin_user(
+    current_user: Annotated[schemas.User, Depends(get_current_active_user)]
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admins have access to this.")
+    return current_user
+
+
+
+@app.get("/maintenance")
+async def set_maintenance_mode(
+    current_admin_user: Annotated[schemas.User, Depends(get_current_admin_user)],
+    db: Session = Depends(get_db)
+):
+    users = crud.get_users(db)
+    for user in users:
+        print('---------------------------------')
+        print(user.email)
+        task_send_notification.delay(user.email)
+    return 'ok'
+
+
+# @app.get("/maintenance")
+# async def set_maintenance_mode(
+#     current_admin_user: Annotated[schemas.User, Depends(get_current_admin_user)],
+#     db: Session = Depends(get_db)
+# ):
+#     users = crud.get_users(db)
+#     for user in users:
+#         print('---------------------------------')
+#         print(user.email)
+#         send_maintenance_notification.delay(user.email)
+#     return 'ok'

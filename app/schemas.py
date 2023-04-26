@@ -40,9 +40,12 @@ class UserCreate(UserDetailed):
 
 class User(UserBase):
     is_active: bool
-
+    is_admin: bool
     class Config:
         orm_mode = True
+
+
+
 
 
 class Token(BaseModel):

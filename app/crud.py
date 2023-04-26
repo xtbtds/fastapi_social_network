@@ -24,6 +24,7 @@ def create_user(db: Session, user: schemas.UserCreate):
         name=user.name,
         surname=user.surname,
         is_active=False,
+        is_admin=False
     )
     db.add(db_user)
     return db_user
