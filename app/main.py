@@ -225,9 +225,9 @@ async def set_maintenance_mode(
     current_admin_user: Annotated[schemas.User, Depends(get_current_admin_user)],
     db: Session = Depends(get_db)
 ):
-    users = crud.get_users(db)
-    for user in users:
-        task_send_notification.delay(user.email)
+    users = crud.get_all_users(db)
+    emails = [user.email for user in users]
+    task_send_notification.delay(emails)
     return 'ok'
 
 # @app.post("/ex1")
