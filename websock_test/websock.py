@@ -2,51 +2,19 @@ import asyncio
 import logging
 import aioredis
 from aioredis.client import PubSub, Redis
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from typing import List
+from fastapi.templating import Jinja2Templates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app = FastAPI()
 
-html = """
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>Chat</title>
-    </head>
-    <body>
-        <h1>WebSocket Chat</h1>
-        <h2>Your ID: <span id="ws-id"></span></h2>
-        <form action="" onsubmit="sendMessage(event)">
-            <input type="text" id="messageText" autocomplete="off"/>
-            <button>Send</button>
-        </form>
-        <ul id='messages'>
-        </ul>
-        <script>
-            var client_id = Date.now()
-            document.querySelector("#ws-id").textContent = client_id;
-            var ws = new WebSocket(`ws://localhost:8081/ws/${client_id}`);
-            ws.onmessage = function(event) {
-                var messages = document.getElementById('messages')
-                var message = document.createElement('li')
-                var content = document.createTextNode(event.data)
-                message.appendChild(content)
-                messages.appendChild(message)
-            };
-            function sendMessage(event) {
-                var input = document.getElementById("messageText")
-                ws.send(input.value)
-                input.value = ''
-                event.preventDefault()
-            }
-        </script>
-    </body>
-</html>
-"""
+
+templates = Jinja2Templates(directory="templates")
+
 
 class ConnectionManager:
     def __init__(self):
@@ -69,13 +37,13 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.get("/")
-async def get():
-    return HTMLResponse(html)
+@app.get("/chat")
+async def get(request: Request):
+    return templates.TemplateResponse("chat.html", {"request": request})
 
 
 @app.websocket("/ws/{client_id}")
-async def ws_voting_endpoint(websocket: WebSocket, client_id: int):
+async def websocket_endpoint(websocket: WebSocket, client_id: int):
     await manager.connect(websocket)
     await manager.broadcast(f"Client #{client_id} joined the chat")
     await redis_connector(websocket, client_id)

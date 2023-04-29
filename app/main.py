@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime, timedelta
 from typing import List
 
@@ -6,33 +5,26 @@ import jose
 from fastapi.responses import HTMLResponse, JSONResponse, ORJSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from typing_extensions import Annotated
 
-from app import crud, models, schemas
+from app import crud, schemas
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.dependencies import (get_current_active_user, get_current_admin_user,
+                              get_current_user, get_db)
 from app.schemas import User
 from app.utils import auth, pass_hash
 from email_core.celery_worker import task_send_notification
 from email_core.emails import send_confirmation
 from fastapi import (BackgroundTasks, Depends, FastAPI, HTTPException, Request,
                      Response, status)
+from app.routers import users
+
+
 
 app = FastAPI()
+app.include_router(users.router)
 
-
-# Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-        db.commit()
-    except:
-        db.rollback()
-    finally:
-        db.close()
 
 
 @app.post("/register/")
@@ -72,35 +64,6 @@ def email_verification(token: str, db: Session = Depends(get_db)):
     
 
 
-@app.get("/users/", response_model=List[schemas.User])
-def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    users = crud.get_users(db, skip=skip, limit=limit)
-    return users
-
-
-@app.get("/users/{user_id}", response_model=schemas.User)
-def read_user(user_id: int, db: Session = Depends(get_db)):
-    db_user = crud.get_user(db, user_id=user_id)
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return db_user
-
-
-@app.post("/users/{user_id}/posts/", response_model=schemas.Post)
-def create_post_for_user(
-    user_id: int, post: schemas.PostCreate, db: Session = Depends(get_db)
-):
-    return crud.create_user_post(db=db, post=post, user_id=user_id)
-
-
-@app.get("/users/{user_id}/posts/", response_model=List[schemas.Post])
-def read_user_posts(user_id: int, db: Session = Depends(get_db)):
-    db_user = crud.get_user(db, user_id=user_id)
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    posts = crud.get_user_posts(db, user_id=db_user.id)
-    return posts
-
 
 @app.get("/posts/", response_model=List[schemas.Post])
 def read_posts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -108,39 +71,6 @@ def read_posts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return posts
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
-
-# Dependency
-async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
-):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        email: str = payload.get("email")
-        if email is None:
-            raise credentials_exception
-        token_data = schemas.TokenData(email=email)
-    except JWTError:
-        raise credentials_exception
-    user = crud.get_user_by_email(db, email=token_data.email)
-    if user is None:
-        raise credentials_exception
-    return user
-
-
-# Dependency
-async def get_current_active_user(
-    current_user: Annotated[schemas.User, Depends(get_current_user)]
-):
-    if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
 
 
 # Login endpoint
@@ -199,24 +129,6 @@ async def refresh(refresh_token: str, db: Session = Depends(get_db)):
     # 1. should be store in cookies
     # 2. should become invalid when used (delete cookie or what?)
     # 3. question: when verifying token, should its expiration date be checked?
-
-
-
-# Endpoint get current user
-@app.get("/users/me/", response_model=schemas.User)
-async def read_users_me(
-    current_user: Annotated[schemas.User, Depends(get_current_active_user)]
-):
-    return current_user
-
-
-# Dependency
-async def get_current_admin_user(
-    current_user: Annotated[schemas.User, Depends(get_current_active_user)]
-):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admins have access to this.")
-    return current_user
 
 
 
