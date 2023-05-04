@@ -55,14 +55,14 @@ async def consumer_handler(conn: Redis, ws: WebSocket, client_id):
         while True:
             message = await ws.receive_text()
             if message:
-                await conn.publish("chat:c", message)
+                await conn.publish("chan1", message)
     except WebSocketDisconnect as exc:
         manager.disconnect(ws)
         await manager.broadcast(f"Client #{client_id} left the chat")
 
 
 async def producer_handler(pubsub: PubSub, ws: WebSocket, client_id):
-    await pubsub.subscribe("chat:c")
+    await pubsub.subscribe("")
     try:
         while True:
             message = await pubsub.get_message(ignore_subscribe_messages=True)

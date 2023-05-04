@@ -13,20 +13,10 @@ class User(Base):
     hashed_password = Column(String)
     is_active = Column(Boolean, default=False, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
-    # role_id = Column(Integer, ForeignKey("roles.id"))
 
     posts = relationship("Post", back_populates="owner")
-    # role = relationship("Role", back_populates="users")
-
-
-# class Role(Base):
-#     __tablename__ = "roles"
-#     id = Column(Integer, primary_key=True, index=True)
-#     name = Column(String)
-#     description = Column(Text)
-
-#     users = relationship("User", back_populates="role")
-
+    messages = relationship("Message", back_populates="owner")
+    chats = relationship("UserChat", back_populates="user")
 
 
 class Post(Base):
@@ -40,7 +30,31 @@ class Post(Base):
     owner = relationship("User", back_populates="posts")
 
 
-# class Group(Base):
-#     __tablename__ = "groups"
-#     id = Column(Integer, primary_key=True, index=True)
-#     name = Column(String)
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    chat_id = Column(Integer, ForeignKey("chats.id"))
+
+    owner = relationship("User", back_populates="messages")
+    chat = relationship("Chat", back_populates="messages")
+
+
+class Chat(Base):
+    __tablename__ = "chats"
+    id = Column(Integer, primary_key=True, index=True)
+    unique_name = Column(String, index=True, unique=True)
+
+    messages = relationship("Message", back_populates="chat")
+    users = relationship("UserChat", back_populates="chat")
+
+
+class UserChat(Base):
+    __tablename__ = "userchat"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    chat_id = Column(Integer, ForeignKey("chats.id"))
+    role = Column(String)
+
+    user = relationship("User", back_populates="chats")
+    chat = relationship("Chat", back_populates="users")

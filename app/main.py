@@ -1,154 +1,105 @@
 from datetime import datetime, timedelta
 from typing import List
-
+import time
 import jose
 from fastapi.responses import HTMLResponse, JSONResponse, ORJSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
+from fastapi.websockets import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from typing_extensions import Annotated
-
-from app import crud, schemas
+from fastapi.websockets import WebSocket, WebSocketDisconnect
+import asyncio
+import logging
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+from aioredis.errors import ConnectionClosedError as ServerConnectionClosedError
+from app import crud, schemas, models
 from app.core.config import settings
 from app.dependencies import (get_current_active_user, get_current_admin_user,
                               get_current_user, get_db)
+from app.routers import users
 from app.schemas import User
 from app.utils import auth, pass_hash
 from email_core.celery_worker import task_send_notification
 from email_core.emails import send_confirmation
 from fastapi import (BackgroundTasks, Depends, FastAPI, HTTPException, Request,
                      Response, status)
-from app.routers import users
-
-
+import aioredis
 
 app = FastAPI()
 app.include_router(users.router)
 
 
-
-@app.post("/register/")
-async def create_user(background_tasks: BackgroundTasks, user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = crud.get_user_by_email(db, email=user.email)
-    if db_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
-        )
-    db_user = crud.create_user(db=db, user=user)
-    if db_user:
-        background_tasks.add_task(send_confirmation, user.email, db_user)
-        return ORJSONResponse(User(**db_user.__dict__).dict(),status.HTTP_201_CREATED)
-    return Response(status_code=status.HTTP_403_FORBIDDEN)
+async def get_redis_pool():
+    pool = await aioredis.create_redis_pool(('redis', 6379), encoding='utf-8')
+    return pool
 
 
-templates = Jinja2Templates(directory="templates")
+async def receive_from_websocket(redis_conn, websocket, stream):
+    ws_connected = True
+    pool = await get_redis_pool()
+    while ws_connected:
+        message = await websocket.receive_text()
+        result = await redis_conn.xadd(stream, {"data": message})
 
 
-@app.get("/verification", response_class=HTMLResponse)
-def email_verification(token: str, db: Session = Depends(get_db)):
-    try:
-        user = auth.verify_token(db, token)
-    except jose.exceptions.JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if user and not user.is_active:
-        user.is_active = True
-        db.add(user)
-        db.commit()
-        return 'ok'
-    elif user.is_active:
-        return 'user has been activated already'
-    
+async def read_from_stream(stream, websocket: WebSocket):
+    pool = await get_redis_pool()
+    latest_ids = [b'0-0']
+    ws_connected = True
+    first_run = True
+    while pool and ws_connected:
+        try:
+            # if first_run:
+            #     # fetch some previous chat history
+            #     events = await pool.xrevrange(
+            #         stream=stream,
+            #         count=5,
+            #         start='+',
+            #         stop='-'
+            #     )
+            #     first_run = False
+            #     events.reverse()
+            #     for e_id, e in events:
+            #         e['e_id'] = e_id
+            #         await websocket.send_json(e)
+            # else:
+            messages = await pool.xread(
+                streams=[stream],
+                count=3,
+                timeout=0,
+                latest_ids=latest_ids
+            )
+            for stream_id, message_id, data in messages:
+                data['message_id'] = message_id
+                await websocket.send_json(data)
+                # print(data)
+                logging.warning(data)
+                latest_ids = [message_id]
+        except ConnectionClosedError:
+            ws_connected = False
 
+        except ConnectionClosedOK:
+            ws_connected = False
 
-
-@app.get("/posts/", response_model=List[schemas.Post])
-def read_posts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    posts = crud.get_posts(db, skip=skip, limit=limit)
-    return posts
-
-
-
-
-# Login endpoint
-@app.post("/login")
-async def login_for_access_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: Session = Depends(get_db),
-):
-    user = crud.get_user_by_email(db, form_data.username)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with provided email doesn't exist. You need to register first",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="You need to activate your account before logging in. Check your email.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not pass_hash.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    access_token = auth.create_access_token(
-        data={"email": user.email}, expires_delta=access_token_expires
-    )
-    refresh_token_expires = timedelta(minutes=int(settings.REFRESH_TOKEN_EXPIRE_MINUTES))
-    refresh_token = auth.create_refresh_token(
-        data={"email": user.email}, expires_delta=refresh_token_expires
-    )
-    return {"access_token": access_token, "refresh_token": refresh_token}
-    # 1. should be store in cookies
-    # 2. should become invalid when new pair is created
+        except ServerConnectionClosedError:
+            print('redis server connection closed')
+            return
+    pool.close()
 
 
 
-@app.post("/refresh")
-async def refresh(refresh_token: str, db: Session = Depends(get_db)):
-    user = auth.verify_token(db, refresh_token)
-    print('-----------------------------')
-    print(user)
-    access_token_expires = timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    access_token = auth.create_access_token(
-        data={"email": user.email}, expires_delta=access_token_expires
-    )
-    refresh_token_expires = timedelta(minutes=int(settings.REFRESH_TOKEN_EXPIRE_MINUTES))
-    refresh_token = auth.create_refresh_token(
-        data={"email": user.email}, expires_delta=refresh_token_expires
-    )
-    return {"access_token": access_token, "refresh_token": refresh_token}
-    # 1. should be store in cookies
-    # 2. should become invalid when used (delete cookie or what?)
-    # 3. question: when verifying token, should its expiration date be checked?
+
+def get_user_chats(db: Session, user_id: int):
+    chats_ids = db.query(models.UserChat).filter(models.UserChat.user_id == user_id).all()
+    chats_names = [db.query(models.Chat).filter(models.Chat.id == chat.id).all() for chat in chats_ids]
+    return chats_names
 
 
-
-@app.get("/maintenance")
-async def set_maintenance_mode(
-    current_admin_user: Annotated[schemas.User, Depends(get_current_admin_user)],
-    db: Session = Depends(get_db)
-):
-    users = crud.get_all_users(db)
-    emails = [user.email for user in users]
-    task_send_notification.delay(emails)
-    return 'ok'
-
-# @app.post("/ex1")
-# def run_task(data=Body(...)):
-#     amount = int(data["amount"])
-#     x = data["x"]
-#     y = data["y"]
-#     task1 = create_task.delay(amount, x, y)
-#     task2 = create_task.delay(amount, x, y)
-#     task3 = create_task.delay(amount, x, y)
-#     return JSONResponse({"Result1": task1.get(), "Result2": task2.get(), "Result3": task3.get()})
-
+@app.websocket("/chats/{room_id}")
+async def websocket(websocket: WebSocket, room_id, db=Depends(get_db)):
+    stream = f"stream:{room_id}"
+    print('in an endpoint')
+    await websocket.accept()
+    # await receive_from_websocket(redis_conn, websocket, stream) #WORKS
+    await read_from_stream(stream, websocket=websocket)
