@@ -1,8 +1,13 @@
 import asyncio
 import logging
+from jose import JWTError, jwt
+from starlette.websockets import WebSocketDisconnect
+from app import crud
+from app.core.config import settings
 import time
 from datetime import datetime, timedelta
 from typing import List
+from collections import OrderedDict
 
 import aioredis
 import jose
@@ -159,70 +164,93 @@ async def get_redis_pool():
     return pool
 
 
-async def receive_from_websocket(websocket, user_id, db: Session):
-    # Fix: not use db, use SISMEMBER from redis set 
+
+@app.post("/chats/add")
+async def add_user(
+    current_active_user: Annotated[schemas.User, Depends(get_current_active_user)],
+                                  chat_id, 
+                                  user_id, 
+                                  pool = Depends(get_redis_pool),
+                                  db = Depends(get_db)):
+    current_user = crud.get_user_by_email(db, current_active_user.email)
+    isMemberCurrent = await pool.sismember(f"{chat_id}:users", current_user.id)
+    isMemberTarget = await pool.sismember(f"{chat_id}:users", user_id)
+    if not isMemberCurrent:
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, 
+                        content={'msg':'You must be a member of the chat in order to add other member'})
+    if isMemberTarget:
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, 
+                        content=f'User {user_id} is already a chat member')
+    else:
+        await pool.sadd(f"{chat_id}:users", user_id)
+        await pool.sadd(f"{user_id}:chats", chat_id)
+        stream = f"stream:{chat_id}"
+        if current_user.id == user_id:
+            await pool.xadd(stream=stream,
+                            fields={"chat_id": str(chat_id),"content": f"User {user_id} joined the chat"},
+                            message_id=b'*',
+                            max_len=100)
+        else:
+            await pool.xadd(stream=stream,
+                            fields={"chat_id": str(chat_id),"content": f"User {current_user.id} added user {user_id}"},
+                            message_id=b'*',
+                            max_len=100)
+        return Response(status_code=status.HTTP_201_CREATED, 
+                        content=f'You added user {user_id} to chat {chat_id}')
+
+
+# def: delete user from chat
+async def remove_user(chat_id, user_id, pool = Depends(get_redis_pool)):
+    await pool.srem(f"{chat_id}:users", user_id)
+    await pool.srem(f"{user_id}:chats", chat_id)
+    #fix: check if he IS in chat
+    #fix: send for all users in a chat "user ... left chat" and add this message to redis stream
+    #or user ... removed user ...
+
+
+
+async def receive_from_websocket(websocket, user_id):
     ws_connected = True
     pool = await get_redis_pool()
     while ws_connected:
         message = await websocket.receive_json()
         if message:
+            # fix: user pydantic data validation
             try:
                 chat_id = message['chat_id']
+                content = message['content']
             except:
-                data = {'error': 'chat not specified'}
+                data = {'error': 'invalid data'}
                 await websocket.send_json(data)
                 continue
-            if int(chat_id) in get_user_chats(db, user_id):
-                # await pool.sismember(f"{chat_id}:users", user_id)
+
+            ismember = await pool.sismember(f"{chat_id}:users", user_id)
+            if ismember:
                 stream = f"stream:{chat_id}"
             else:
                 data = {"error": "you can't post to this chat"}
                 await websocket.send_json(data)
                 continue
-        # fields = {
-        #         "user_id": "user_id",
-        #         "msg": message,
-        #         "chat_id": "chat_id"
-        # }
+        fields = {
+                "chat_id": str(chat_id),
+                "user_id": str(user_id),
+                "content": str(content),
+        }
         await pool.xadd(stream=stream,
-                            fields=message,
+                            fields=fields,
                             message_id=b'*',
                             max_len=100)
 
-#redis:
-# def: if user in chat
-# def: add user to chat
-# def: delete user from chat
-# def create chat (add this user to chat; make him owner)
 
-#db:
-# def: save new chat
-# def: save user-chat-role (when from redis added user to chat)
-# def: save message to messages table immediately after sending to ws
-
-
-
-async def send_to_websocket(streams: List, websocket: WebSocket):
+async def send_to_websocket(websocket: WebSocket, user_id):
     pool = await get_redis_pool()
-    latest_ids = [b'0-0' for stream in streams]
+    chats = await pool.smembers(f"{user_id}:chats")
+    streams = [f"stream:{chat_id}" for chat_id in chats]
+    streams_ids_dict = OrderedDict.fromkeys(streams, b"0-0")
+    latest_ids = streams_ids_dict.values()
     ws_connected = True
-    first_run = True
     while pool and ws_connected:
         try:
-            # if first_run:
-            #     # fetch some previous chat history
-            #     events = await pool.xrevrange(
-            #         stream=stream,
-            #         count=5,
-            #         start='+',
-            #         stop='-'
-            #     )
-            #     first_run = False
-            #     events.reverse()
-            #     for e_id, e in events:
-            #         e['e_id'] = e_id
-            #         await websocket.send_json(e)
-            # else:
             messages = await pool.xread(
                 streams=streams,
                 count=3,
@@ -232,35 +260,37 @@ async def send_to_websocket(streams: List, websocket: WebSocket):
             for stream_id, message_id, data in messages:
                 data['message_id'] = message_id
                 await websocket.send_json(data)
-                # FIX: own message id for each stream!
-                latest_ids = [message_id for i in streams]
+                streams_ids_dict[f"stream:{data['chat_id']}"] = message_id
+                latest_ids = streams_ids_dict.values()
+
         except ConnectionClosedError:
             ws_connected = False
 
         except ConnectionClosedOK:
             ws_connected = False
 
+        except WebSocketDisconnect:
+            ws_connected = False
+
         except ServerConnectionClosedError:
             print('redis server connection closed')
             return
+        # except:
+        #     pass
     pool.close()
 
 
 
-
-def get_user_chats(db: Session, user_id: int):
-    chats_models = db.query(models.UserChat).filter(models.UserChat.user_id == user_id).all()
-    chats_ids = [chat.chat_id for chat in chats_models]
-    return chats_ids
-
-
-
 @app.websocket("/chats")
-# fix: user_id must be auth token to get current user
-async def websocket(websocket: WebSocket, user_id, db=Depends(get_db)):
-    # fix: not from db but from "user_id:chats" redis set
-    chats = get_user_chats(db, user_id)
-    streams = [f"stream:{chat_id}" for chat_id in chats]
+async def websocket(websocket: WebSocket, token, db=Depends(get_db)):
+    pool = await get_redis_pool()
     await websocket.accept()
-    await asyncio.gather(receive_from_websocket(websocket, user_id, db),
-                             send_to_websocket(streams, websocket))
+    try:
+        decoded_token = jwt.decode(token, settings.SECRET_KEY, algorithms=settings.ALGORITHM)
+        email = decoded_token.get('email')
+        user = crud.get_user_by_email(db, email)
+    except:
+        await websocket.send_json({"error": f"Not authenticated"})
+        return
+    await asyncio.gather(receive_from_websocket(websocket, user_id=user.id),
+                            send_to_websocket(websocket, user_id=user.id))

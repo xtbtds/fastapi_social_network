@@ -48,3 +48,9 @@ def create_user_post(db: Session, post: schemas.PostCreate, user_id: int):
     db.commit()
     db.refresh(db_item)
     return db_item
+
+
+def get_user_chats(db: Session, user_id: int):
+    chats_models = db.query(models.UserChat).filter(models.UserChat.user_id == user_id).all()
+    chats_ids = [chat.chat_id for chat in chats_models]
+    return chats_ids
