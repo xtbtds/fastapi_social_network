@@ -1,13 +1,9 @@
 import asyncio
 import logging
-from jose import JWTError, jwt
-from starlette.websockets import WebSocketDisconnect
-from app import crud
-from app.core.config import settings
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import List
-from collections import OrderedDict
 
 import aioredis
 import jose
@@ -17,7 +13,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, ORJSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
 from fastapi.websockets import WebSocket, WebSocketDisconnect
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
+from starlette.websockets import WebSocketDisconnect
 from typing_extensions import Annotated
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
@@ -32,7 +30,6 @@ from email_core.celery_worker import task_send_notification
 from email_core.emails import send_confirmation
 from fastapi import (BackgroundTasks, Depends, FastAPI, HTTPException, Request,
                      Response, status)
-
 
 app = FastAPI()
 app.include_router(users.router)
@@ -168,19 +165,19 @@ async def get_redis_pool():
 @app.post("/chats/add")
 async def add_user(
     current_active_user: Annotated[schemas.User, Depends(get_current_active_user)],
-                                  chat_id, 
-                                  user_id, 
+                                  chat_id: int, 
+                                  user_id: int, 
                                   pool = Depends(get_redis_pool),
                                   db = Depends(get_db)):
     current_user = crud.get_user_by_email(db, current_active_user.email)
     isMemberCurrent = await pool.sismember(f"{chat_id}:users", current_user.id)
     isMemberTarget = await pool.sismember(f"{chat_id}:users", user_id)
-    if not isMemberCurrent:
-        return Response(status_code=status.HTTP_400_BAD_REQUEST, 
-                        content={'msg':'You must be a member of the chat in order to add other member'})
+    if not isMemberCurrent and user_id != current_user.id:
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, 
+                        content={'msg':f'User {current_user.id}, you must be a member of the chat in order to add other member'})
     if isMemberTarget:
-        return Response(status_code=status.HTTP_400_BAD_REQUEST, 
-                        content=f'User {user_id} is already a chat member')
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, 
+                        content={"msg":f"User {user_id} is already a chat member"})
     else:
         await pool.sadd(f"{chat_id}:users", user_id)
         await pool.sadd(f"{user_id}:chats", chat_id)
@@ -195,11 +192,11 @@ async def add_user(
                             fields={"chat_id": str(chat_id),"content": f"User {current_user.id} added user {user_id}"},
                             message_id=b'*',
                             max_len=100)
-        return Response(status_code=status.HTTP_201_CREATED, 
-                        content=f'You added user {user_id} to chat {chat_id}')
+        return JSONResponse(status_code=status.HTTP_201_CREATED, 
+                        content={'msg':f'You added user {user_id} to chat {chat_id}'})
 
 
-# def: delete user from chat
+@app.post("/chats/remove")
 async def remove_user(chat_id, user_id, pool = Depends(get_redis_pool)):
     await pool.srem(f"{chat_id}:users", user_id)
     await pool.srem(f"{user_id}:chats", chat_id)
@@ -245,38 +242,38 @@ async def receive_from_websocket(websocket, user_id):
 async def send_to_websocket(websocket: WebSocket, user_id):
     pool = await get_redis_pool()
     chats = await pool.smembers(f"{user_id}:chats")
-    streams = [f"stream:{chat_id}" for chat_id in chats]
-    streams_ids_dict = OrderedDict.fromkeys(streams, b"0-0")
-    latest_ids = streams_ids_dict.values()
-    ws_connected = True
-    while pool and ws_connected:
-        try:
-            messages = await pool.xread(
-                streams=streams,
-                count=3,
-                timeout=0, 
-                latest_ids=list(latest_ids)
-            )
-            for stream_id, message_id, data in messages:
-                data['message_id'] = message_id
-                await websocket.send_json(data)
-                streams_ids_dict[f"stream:{data['chat_id']}"] = message_id
-                latest_ids = streams_ids_dict.values()
+    logging.warn(chats)
+    if chats:
+        streams = [f"stream:{chat_id}" for chat_id in chats]
+        streams_ids_dict = OrderedDict.fromkeys(streams, b"0-0")
+        latest_ids = streams_ids_dict.values()
+        ws_connected = True
+        while pool and ws_connected:
+            try:
+                messages = await pool.xread(
+                    streams=streams,
+                    count=3,
+                    timeout=0, 
+                    latest_ids=list(latest_ids)
+                )
+                for stream_id, message_id, data in messages:
+                    data['message_id'] = message_id
+                    await websocket.send_json(data)
+                    streams_ids_dict[f"stream:{data['chat_id']}"] = message_id
+                    latest_ids = streams_ids_dict.values()
 
-        except ConnectionClosedError:
-            ws_connected = False
+            except ConnectionClosedError:
+                ws_connected = False
 
-        except ConnectionClosedOK:
-            ws_connected = False
+            except ConnectionClosedOK:
+                ws_connected = False
 
-        except WebSocketDisconnect:
-            ws_connected = False
+            except WebSocketDisconnect:
+                ws_connected = False
 
-        except ServerConnectionClosedError:
-            print('redis server connection closed')
-            return
-        # except:
-        #     pass
+            except ServerConnectionClosedError:
+                print('redis server connection closed')
+                return
     pool.close()
 
 
