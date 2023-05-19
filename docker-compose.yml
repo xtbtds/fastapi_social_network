@@ -50,7 +50,7 @@ services:
     container_name: celery_worker
     build: .
     # command: celery -A app.celery_worker.celery worker --loglevel=info
-    command: celery -A crontab_tasks.tasks worker --loglevel=info
+    command: celery -A backup_celery.tasks worker --loglevel=info
     volumes:
       - .:/app
     environment:
@@ -64,7 +64,7 @@ services:
     container_name: celery_beat
     build: .
     # command: celery -A app.celery_worker.celery worker --loglevel=info
-    command: celery -A crontab_tasks.tasks beat --loglevel=info
+    command: celery -A backup_celery.tasks beat --loglevel=info
     volumes:
       - .:/app
     environment:
@@ -74,19 +74,19 @@ services:
       - redis
       - api
 
-  # flower:
-  #   container_name: flower
-  #   build: .
-  #   command: celery -A app.celery_worker.celery flower --port=5555
-  #   ports:
-  #     - 5556:5555
-  #   environment:
-  #     - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-  #     - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
-  #   depends_on:
-  #     - redis
-  #     - api
-  #     - celery_worker
+  flower:
+    container_name: flower
+    build: .
+    command: celery flower --port=5555
+    ports:
+      - 5556:5555
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    depends_on:
+      - redis
+      - api
+      - celery_worker
   
   # redisinsight:
   #   depends_on:

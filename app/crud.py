@@ -31,6 +31,8 @@ def create_user(db: Session, user: schemas.UserCreate):
         is_admin=False
     )
     db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
     return db_user
 
 
@@ -63,3 +65,6 @@ def create_message(db: Session, messages: List[schemas.Message]):
             **m.dict()
         )
         db.add(db_message)
+        db.commit()
+        db.refresh(db_message)
+    return 'ok'
