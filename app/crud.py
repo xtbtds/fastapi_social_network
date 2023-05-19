@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.utils import pass_hash
+from typing import List
 
 
 def get_user(db: Session, user_id: int):
@@ -54,3 +55,11 @@ def get_user_chats(db: Session, user_id: int):
     chats_models = db.query(models.UserChat).filter(models.UserChat.user_id == user_id).all()
     chats_ids = [chat.chat_id for chat in chats_models]
     return chats_ids
+
+
+def create_message(db: Session, messages: List[schemas.Message]):
+    for m in messages:
+        db_message = models.Message(
+            **m.dict()
+        )
+        db.add(db_message)

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import pytz
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import List
@@ -26,7 +27,7 @@ from app.dependencies import (get_current_active_user, get_current_admin_user,
 from app.routers import users
 from app.schemas import User
 from app.utils import auth, pass_hash
-from email_core.celery_worker import task_send_notification
+from app.celery_worker import task_send_notification
 from email_core.emails import send_confirmation
 from fastapi import (BackgroundTasks, Depends, FastAPI, HTTPException, Request,
                      Response, status)
@@ -157,8 +158,7 @@ async def set_maintenance_mode(
 
 
 async def get_redis_pool():
-    pool = await aioredis.create_redis_pool(('redis', 6379), encoding='utf-8')
-    return pool
+    return await aioredis.create_redis_pool(('redis', 6379), encoding='utf-8')
 
 
 
@@ -196,7 +196,7 @@ async def add_user(
                         content={'msg':f'You added user {user_id} to chat {chat_id}'})
 
 
-@app.post("/chats/remove")
+@app.post("/chats/remove") # delete?
 async def remove_user(chat_id, user_id, pool = Depends(get_redis_pool)):
     await pool.srem(f"{chat_id}:users", user_id)
     await pool.srem(f"{user_id}:chats", chat_id)
@@ -207,8 +207,12 @@ async def remove_user(chat_id, user_id, pool = Depends(get_redis_pool)):
 
 
 async def receive_from_websocket(websocket, user_id):
-    ws_connected = True
+    """
+    receives json data from client over a WebSocket, 
+    adds messages in the associated chat stream
+    """
     pool = await get_redis_pool()
+    ws_connected = True
     while ws_connected:
         message = await websocket.receive_json()
         if message:
@@ -228,10 +232,13 @@ async def receive_from_websocket(websocket, user_id):
                 data = {"error": "you can't post to this chat"}
                 await websocket.send_json(data)
                 continue
+        date_time_default = pytz.utc.localize(datetime.utcnow())
+        date_time = date_time_default.astimezone(pytz.timezone("Europe/Warsaw"))
         fields = {
                 "chat_id": str(chat_id),
                 "user_id": str(user_id),
                 "content": str(content),
+                "date_time": date_time.isoformat()
         }
         await pool.xadd(stream=stream,
                             fields=fields,
@@ -240,6 +247,10 @@ async def receive_from_websocket(websocket, user_id):
 
 
 async def send_to_websocket(websocket: WebSocket, user_id):
+    """
+    waits for new items in chat stream and
+    sends data to client over a WebSocket
+    """
     pool = await get_redis_pool()
     chats = await pool.smembers(f"{user_id}:chats")
     logging.warn(chats)
@@ -248,19 +259,38 @@ async def send_to_websocket(websocket: WebSocket, user_id):
         streams_ids_dict = OrderedDict.fromkeys(streams, b"0-0")
         latest_ids = streams_ids_dict.values()
         ws_connected = True
+        first_run = False
         while pool and ws_connected:
             try:
-                messages = await pool.xread(
+                if first_run:
+                    pass
+                    # fetch some previous chat history
+                    # for stream in streams:
+                    #     print(stream, '-----------')
+                    #     messages = await pool.xrevrange(
+                    #         stream=stream,
+                    #         count=0,
+                    #         start='+',
+                    #         stop='-'
+                    #     )
+                    #     print(messages)
+                    #     first_run = False
+                    #     messages.reverse()
+                    #     for message_id, data in messages:
+                    #         data['message_id'] = message_id
+                    #         await websocket.send_json(data)
+                else:
+                    messages = await pool.xread(
                     streams=streams,
                     count=3,
                     timeout=0, 
                     latest_ids=list(latest_ids)
-                )
-                for stream_id, message_id, data in messages:
-                    data['message_id'] = message_id
-                    await websocket.send_json(data)
-                    streams_ids_dict[f"stream:{data['chat_id']}"] = message_id
-                    latest_ids = streams_ids_dict.values()
+                    )
+                    for stream_id, message_id, data in messages:
+                        data['message_id'] = message_id
+                        await websocket.send_json(data)
+                        streams_ids_dict[f"stream:{data['chat_id']}"] = message_id
+                        latest_ids = streams_ids_dict.values()
 
             except ConnectionClosedError:
                 ws_connected = False
@@ -280,14 +310,18 @@ async def send_to_websocket(websocket: WebSocket, user_id):
 
 @app.websocket("/chats")
 async def websocket(websocket: WebSocket, token, db=Depends(get_db)):
-    pool = await get_redis_pool()
     await websocket.accept()
     try:
         decoded_token = jwt.decode(token, settings.SECRET_KEY, algorithms=settings.ALGORITHM)
         email = decoded_token.get('email')
         user = crud.get_user_by_email(db, email)
+    except jose.exceptions.ExpiredSignatureError:
+        await websocket.send_json({"error": f"Your session has expired, log in again"})
+        await websocket.close()
+        return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED)
     except:
         await websocket.send_json({"error": f"Not authenticated"})
-        return
+        await websocket.close()
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST)
     await asyncio.gather(receive_from_websocket(websocket, user_id=user.id),
                             send_to_websocket(websocket, user_id=user.id))

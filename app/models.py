@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -33,6 +33,9 @@ class Post(Base):
 class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer, primary_key=True, index=True)
+    redis_id = Column(String)
+    context = Column(Text)
+    datetime = Column(DateTime)
     owner_id = Column(Integer, ForeignKey("users.id"))
     chat_id = Column(Integer, ForeignKey("chats.id"))
 
@@ -43,7 +46,6 @@ class Message(Base):
 class Chat(Base):
     __tablename__ = "chats"
     id = Column(Integer, primary_key=True, index=True)
-    unique_name = Column(String, index=True, unique=True)
 
     messages = relationship("Message", back_populates="chat")
     users = relationship("UserChat", back_populates="chat")
@@ -54,7 +56,7 @@ class UserChat(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     chat_id = Column(Integer, ForeignKey("chats.id"))
-    role = Column(String)
+    role = Column(String, default='User', nullable=False)
 
     user = relationship("User", back_populates="chats")
     chat = relationship("Chat", back_populates="users")

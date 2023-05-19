@@ -1,7 +1,7 @@
 from typing import List, Union
 
 from pydantic import BaseModel, Field
-
+from datetime import datetime
 
 class PostBase(BaseModel):
     title: str
@@ -45,13 +45,12 @@ class User(UserBase):
         orm_mode = True
 
 
+class Message(BaseModel):
+    redis_id: str
+    context: str
+    datetime: datetime
+    owner_id: int
+    chat_id: int
+    class Config:
+        orm_mode = True
 
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-
-class TokenData(BaseModel):
-    email: Union[str, None] = None

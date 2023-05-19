@@ -42,7 +42,7 @@ async def send_confirmation(email: List, instance: schemas.User):
     """
     message = MessageSchema(
         subject="Account Verification Mail",
-        recipients=[email],  # List of recipients, as many as you can pass
+        recipients=[email], 
         body=template,
         subtype="html",
     )
