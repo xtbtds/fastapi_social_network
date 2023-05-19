@@ -28,14 +28,10 @@ async def backup():
                 redis_messages.append(message_model)
         print('im checking your messages', redis_messages)
         result = crud.create_message(db, redis_messages)
-        print(result, '====================')
     finally:
         pool.close()
         db.close()
 
-
 @app.task
 def check():
     return asyncio.run(backup())
-    # print("I am checking your stuff, ")
-

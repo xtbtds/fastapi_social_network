@@ -27,7 +27,7 @@ from app.dependencies import (get_current_active_user, get_current_admin_user,
 from app.routers import users
 from app.schemas import User
 from app.utils import auth, pass_hash
-from app.celery_worker import task_send_notification
+from backup_celery.maintenance_task import task_send_notification
 from email_core.emails import send_confirmation
 from fastapi import (BackgroundTasks, Depends, FastAPI, HTTPException, Request,
                      Response, status)
@@ -129,8 +129,6 @@ async def login_for_access_token(
 @app.post("/refresh")
 async def refresh(refresh_token: str, db: Session = Depends(get_db)):
     user = auth.verify_token(db, refresh_token)
-    print('-----------------------------')
-    print(user)
     access_token_expires = timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     access_token = auth.create_access_token(
         data={"email": user.email}, expires_delta=access_token_expires

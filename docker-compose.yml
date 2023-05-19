@@ -49,8 +49,7 @@ services:
   celery_worker:
     container_name: celery_worker
     build: .
-    # command: celery -A app.celery_worker.celery worker --loglevel=info
-    command: celery -A backup_celery.tasks worker --loglevel=info
+    command: celery -A backup_celery.backup_task worker --loglevel=info
     volumes:
       - .:/app
     environment:
@@ -63,8 +62,7 @@ services:
   celery_beat:
     container_name: celery_beat
     build: .
-    # command: celery -A app.celery_worker.celery worker --loglevel=info
-    command: celery -A backup_celery.tasks beat --loglevel=info
+    command: celery -A backup_celery.backup_task beat --loglevel=info
     volumes:
       - .:/app
     environment:

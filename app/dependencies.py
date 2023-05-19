@@ -11,7 +11,6 @@ from fastapi import Depends, HTTPException, status
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
-# Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -23,7 +22,7 @@ def get_db():
         db.close()
 
 
-# Dependency
+
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
 ):
@@ -47,7 +46,6 @@ async def get_current_user(
 
 
 
-# Dependency
 async def get_current_active_user(
     current_user: Annotated[schemas.User, Depends(get_current_user)]
 ):
@@ -57,7 +55,6 @@ async def get_current_active_user(
 
 
 
-# Dependency
 async def get_current_admin_user(
     current_user: Annotated[schemas.User, Depends(get_current_active_user)]
 ):
