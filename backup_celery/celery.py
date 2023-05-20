@@ -12,6 +12,6 @@ app.config_from_object('backup_celery.celeryconfig')
 app.conf.beat_schedule = {
     "run-me-every-ten-seconds": {
         "task": "backup_celery.backup_task.check",
-        "schedule": 60.0
+        "schedule": 20.0
     }
 }

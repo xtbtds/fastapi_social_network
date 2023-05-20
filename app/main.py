@@ -180,14 +180,25 @@ async def add_user(
         await pool.sadd(f"{chat_id}:users", user_id)
         await pool.sadd(f"{user_id}:chats", chat_id)
         stream = f"stream:{chat_id}"
+        date_time = datetime.now()
+        # date_time = pytz.utc.localize(datetime.utcnow())
+        # date_time = date_time_default.astimezone(pytz.timezone("Europe/Warsaw"))
         if current_user.id == user_id:
             await pool.xadd(stream=stream,
-                            fields={"chat_id": str(chat_id),"content": f"User {user_id} joined the chat"},
+                            fields={"chat_id": str(chat_id),
+                                    "user_id": str(current_user.id),
+                                    "content": f"User {user_id} joined the chat",
+                                    "date_time": date_time.isoformat()
+                                    },
                             message_id=b'*',
                             max_len=100)
         else:
             await pool.xadd(stream=stream,
-                            fields={"chat_id": str(chat_id),"content": f"User {current_user.id} added user {user_id}"},
+                            fields={"chat_id": str(chat_id),
+                                    "user_id": str(current_user.id),
+                                    "content": f"User {current_user.id} added user {user_id}",
+                                    "date_time": date_time.isoformat()
+                                    },
                             message_id=b'*',
                             max_len=100)
         return JSONResponse(status_code=status.HTTP_201_CREATED, 
@@ -230,8 +241,9 @@ async def receive_from_websocket(websocket, user_id):
                 data = {"error": "you can't post to this chat"}
                 await websocket.send_json(data)
                 continue
-        date_time_default = pytz.utc.localize(datetime.utcnow())
-        date_time = date_time_default.astimezone(pytz.timezone("Europe/Warsaw"))
+        date_time = datetime.now()
+        # date_time = pytz.utc.localize(datetime.utcnow())
+        # date_time = date_time_default.astimezone(pytz.timezone("Europe/Warsaw"))
         fields = {
                 "chat_id": str(chat_id),
                 "user_id": str(user_id),

@@ -40,8 +40,8 @@ class User(UserBase):
 # MESSAGE
 class Message(BaseModel):
     redis_id: str
-    context: str
-    datetime: datetime
+    content: str
+    date_time: datetime
     owner_id: int
     chat_id: int
     class Config:

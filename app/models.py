@@ -34,8 +34,8 @@ class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer, primary_key=True, index=True)
     redis_id = Column(String)
-    context = Column(Text)
-    datetime = Column(DateTime)
+    content = Column(Text)
+    date_time = Column(DateTime)
     owner_id = Column(Integer, ForeignKey("users.id"))
     chat_id = Column(Integer, ForeignKey("chats.id"))
 

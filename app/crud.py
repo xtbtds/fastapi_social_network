@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.utils import pass_hash
 from typing import List
+from sqlalchemy import desc
 
 
 def get_user(db: Session, user_id: int):
@@ -68,3 +69,7 @@ def create_message(db: Session, messages: List[schemas.Message]):
         db.commit()
         db.refresh(db_message)
     return 'ok'
+
+def last_message_date_in_chat(db: Session, chat_id: int):
+    row = db.query(models.Message).filter(models.Message.chat_id == chat_id).order_by(desc(models.Message.date_time)).first()
+    return row
