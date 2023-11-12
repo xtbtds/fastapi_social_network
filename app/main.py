@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import time
-import pytz
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import List
@@ -20,10 +18,10 @@ from starlette.websockets import WebSocketDisconnect
 from typing_extensions import Annotated
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
-from app import crud, models, schemas
+from app import crud, schemas
 from app.core.config import settings
 from app.dependencies import (get_current_active_user, get_current_admin_user,
-                              get_current_user, get_db)
+                              get_db)
 from app.routers import users
 from app.schemas import User
 from app.utils import auth, pass_hash
@@ -37,7 +35,7 @@ app.include_router(users.router)
 templates = Jinja2Templates(directory="templates")
 
 
-@app.post("/register/")
+@app.post("/api/register/")
 async def create_user(background_tasks: BackgroundTasks, user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = crud.get_user_by_email(db, email=user.email)
     if db_user:
@@ -51,7 +49,7 @@ async def create_user(background_tasks: BackgroundTasks, user: schemas.UserCreat
     return Response(status_code=status.HTTP_403_FORBIDDEN)
 
 
-@app.get("/verification", response_class=HTMLResponse)
+@app.get("/api/verification/", response_class=HTMLResponse)
 def email_verification(token: str, db: Session = Depends(get_db)):
     try:
         user = auth.verify_token(db, token)
@@ -68,15 +66,16 @@ def email_verification(token: str, db: Session = Depends(get_db)):
         return 'ok'
     elif user.is_active:
         return 'user has been activated already'
-    
 
-@app.get("/posts/", response_model=List[schemas.Post])
+
+@app.get("/api/posts/", response_model=List[schemas.Post])
 def read_posts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     posts = crud.get_posts(db, skip=skip, limit=limit)
     return posts
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token/")
 
-@app.post("/login")
+@app.post("/api/login/")
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db),
@@ -126,8 +125,8 @@ async def login_for_access_token(
     # 2. should become invalid when new pair is created
 
 
-@app.post("/refresh")
-async def refresh(refresh_token: str, db: Session = Depends(get_db)):
+@app.post("/api/refresh/")
+async def refresh(refresh_token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     user = auth.verify_token(db, refresh_token)
     access_token_expires = timedelta(minutes=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     access_token = auth.create_access_token(
@@ -143,7 +142,7 @@ async def refresh(refresh_token: str, db: Session = Depends(get_db)):
     # 3. question: when verifying token, should its expiration date be checked?
 
 
-@app.get("/maintenance")
+@app.get("/api/maintenance/")
 async def set_maintenance_mode(
     current_admin_user: Annotated[schemas.User, Depends(get_current_admin_user)],
     db: Session = Depends(get_db)
@@ -160,7 +159,7 @@ async def get_redis_pool():
 
 
 
-@app.post("/chats/add")
+@app.post("/api/chats/add/")
 async def add_user(
     current_active_user: Annotated[schemas.User, Depends(get_current_active_user)],
                                   chat_id: int, 
@@ -205,7 +204,7 @@ async def add_user(
                         content={'msg':f'You added user {user_id} to chat {chat_id}'})
 
 
-@app.post("/chats/remove") # delete?
+@app.post("/api/chats/remove/") # delete?
 async def remove_user(chat_id, user_id, pool = Depends(get_redis_pool)):
     await pool.srem(f"{chat_id}:users", user_id)
     await pool.srem(f"{user_id}:chats", chat_id)
@@ -242,8 +241,6 @@ async def receive_from_websocket(websocket, user_id):
                 await websocket.send_json(data)
                 continue
         date_time = datetime.now()
-        # date_time = pytz.utc.localize(datetime.utcnow())
-        # date_time = date_time_default.astimezone(pytz.timezone("Europe/Warsaw"))
         fields = {
                 "chat_id": str(chat_id),
                 "user_id": str(user_id),
@@ -274,21 +271,6 @@ async def send_to_websocket(websocket: WebSocket, user_id):
             try:
                 if first_run:
                     pass
-                    # fetch some previous chat history
-                    # for stream in streams:
-                    #     print(stream, '-----------')
-                    #     messages = await pool.xrevrange(
-                    #         stream=stream,
-                    #         count=0,
-                    #         start='+',
-                    #         stop='-'
-                    #     )
-                    #     print(messages)
-                    #     first_run = False
-                    #     messages.reverse()
-                    #     for message_id, data in messages:
-                    #         data['message_id'] = message_id
-                    #         await websocket.send_json(data)
                 else:
                     messages = await pool.xread(
                     streams=streams,
@@ -318,7 +300,7 @@ async def send_to_websocket(websocket: WebSocket, user_id):
 
 
 
-@app.websocket("/chats")
+@app.websocket("/api/chats/")
 async def websocket(websocket: WebSocket, token, db=Depends(get_db)):
     await websocket.accept()
     try:

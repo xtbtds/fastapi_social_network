@@ -7,6 +7,7 @@ env_path = Path(".") / ".env"
 load_dotenv(dotenv_path=env_path)
 
 
+
 class Settings:
     POSTGRES_USER: str = os.getenv("POSTGRES_USER")
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
