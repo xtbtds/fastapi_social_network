@@ -6,9 +6,10 @@ from typing_extensions import Annotated
 from app import crud, schemas
 from app.core.config import settings
 from app.core.database import SessionLocal
+import logging
 from fastapi import Depends, HTTPException, status
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login/")
 
 
 def get_db():
